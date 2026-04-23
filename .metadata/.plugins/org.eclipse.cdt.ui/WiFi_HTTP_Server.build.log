@@ -1,0 +1,10 @@
+13:56:56 **** Incremental Build of configuration Debug for project WiFi_HTTP_Server ****
+make -j24 all 
+arm-none-eabi-size  WiFi_HTTP_Server.elf 
+   text	   data	    bss	    dec	    hex	filename
+  34344	    120	  96416	 130880	  1ff40	WiFi_HTTP_Server.elf
+Finished building: default.size.stdout
+ 
+
+13:56:56 Build Finished. 0 errors, 0 warnings. (took 181ms)
+
