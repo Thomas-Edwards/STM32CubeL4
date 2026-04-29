@@ -81,7 +81,10 @@ void HAL_DFSDM_FilterRegConvCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filt
 /* Audio processing ----------------------------------------------------------*/
 static void Process_Audio_Data(uint32_t start_index, uint32_t length)
 {
+  static uint32_t last_send_tick = 0; //For timing purposes
+
   int64_t dc_sum = 0;
+
   for (uint32_t i = start_index; i < (start_index + length); i++) {
     dc_sum += ringbuffer[i];
   }
@@ -95,7 +98,39 @@ static void Process_Audio_Data(uint32_t start_index, uint32_t length)
   arm_cmplx_mag_f32(fft_output, to_send, BUFFER_SIZE/2);
   to_send[0] = 0;
 
-  // SEND HERE
+  float32_t rms = 0;
+  arm_rms_f32(fft_input, length, &rms);
+  float32_t db_value = 20.0f * log10f(rms + 1.0f) + 90.0f; // Approx SPL
+
+  if (HAL_GetTick() - last_send_tick > 200) {
+    char wifi_buffer[128];
+    int req_len = snprintf(wifi_buffer, sizeof(wifi_buffer), "GET /api/audio?db=%.1f HTTP/1.1\r\nHost: %s\r\n\r\n", 
+                          db_value, TARGET_HOST);
+    uint16_t sent_len;
+    uint8_t  remote_ip[4];
+
+    if (WIFI_GetHostAddress(TARGET_HOST, remote_ip, sizeof(remote_ip)) == WIFI_STATUS_OK){
+      if (WIFI_OpenClientConnection(WIFI_SOCKET, WIFI_TCP_PROTOCOL, "Flask", NULL, TARGET_PORT, 0) == WIFI_STATUS_OK) {
+        WIFI_SendData(WIFI_SOCKET, (uint8_t*)wifi_buffer, req_len, &sent_len, 5000);
+      
+        // Check for Alarm command from server
+        uint8_t rx_buf[64];
+        uint16_t rx_len;
+        if (WIFI_ReceiveData(WIFI_SOCKET, rx_buf, 64, &rx_len, 1000) == WIFI_STATUS_OK) {
+          if (rx_len > 0) {
+            rx_buf[rx_len] = '\0';
+            if (strstr((char*)rx_buf, "ALARM_ON")) {
+              __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 500); // Trigger buzzer/LED
+            } else {
+              __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0);   // Silence
+            }
+          }
+        }
+        WIFI_CloseClientConnection(WIFI_SOCKET);
+      }
+      last_send_tick = HAL_GetTick();
+    }
+  }
 }
 
 /* Main ----------------------------------------------------------------------*/
