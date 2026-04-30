@@ -78,14 +78,12 @@ void HAL_DFSDM_FilterRegConvCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filt
   data_ready_flag = 2;
 }
 
-/* Audio processing ----------------------------------------------------------*/
 static void Process_Audio_Data(uint32_t start_index, uint32_t length)
 {
+  static uint32_t last_send_tick = 0;
 
-  //DC offset removal
-  static uint32_t last_send_tick = 0; //For timing purposes
+  // DC Offset Removal
   int64_t dc_sum = 0;
-
   for (uint32_t i = start_index; i < (start_index + length); i++) {
     dc_sum += ringbuffer[i];
   }
@@ -95,22 +93,21 @@ static void Process_Audio_Data(uint32_t start_index, uint32_t length)
     fft_input[i] = (float32_t)ringbuffer[i + start_index] - dc_offset;
   }
 
+  // FFT and Magnitude Calculation (to_send contains 1024 floats)
   arm_rfft_fast_f32(&fft_handler, fft_input, fft_output, 0);
   arm_cmplx_mag_f32(fft_output, to_send, BUFFER_SIZE/2);
-  to_send[0] = 0;
-
-  float32_t rms = 0;
-  arm_rms_f32(fft_input, length, &rms);
-  float32_t db_value = 20.0f * log10f(rms + 1.0f) + 90.0f; // Approx SPL
+  to_send[0] = 0; // Remove DC component
 
   // Throttled Transmission (Every 200ms)
   if (HAL_GetTick() - last_send_tick > 200) {
+    // Large buffer needed for 1024 floats as strings (~8 characters per float)
     static char json_payload[9216]; 
     static char http_header[256];
     
     // Start JSON array
     int offset = snprintf(json_payload, sizeof(json_payload), "{\"data\":[");
     for (int i = 0; i < 1024; i++) {
+      // Append floats to the JSON string
       offset += snprintf(json_payload + offset, sizeof(json_payload) - offset, 
                          "%.2f%s", to_send[i], (i == 1023) ? "" : ",");
     }
@@ -127,17 +124,22 @@ static void Process_Audio_Data(uint32_t start_index, uint32_t length)
     uint16_t sent_len;
     uint8_t  remote_ip[4];
 
+    // Connect and Send
     if (WIFI_GetHostAddress(TARGET_HOST, remote_ip, sizeof(remote_ip)) == WIFI_STATUS_OK) {
+      // Pass the resolved remote_ip instead of NULL
       if (WIFI_OpenClientConnection(WIFI_SOCKET, WIFI_TCP_PROTOCOL, "Flask", remote_ip, TARGET_PORT, 0) == WIFI_STATUS_OK) {
         
+        // Send Header then Payload
         WIFI_SendData(WIFI_SOCKET, (uint8_t*)http_header, (uint16_t)header_len, &sent_len, 5000);
         WIFI_SendData(WIFI_SOCKET, (uint8_t*)json_payload, (uint16_t)offset, &sent_len, 5000);
       
+        // 5. Receive Alarm Command from Backend
         uint8_t rx_buf[128];
         uint16_t rx_len;
         if (WIFI_ReceiveData(WIFI_SOCKET, rx_buf, 64, &rx_len, 1000) == WIFI_STATUS_OK) {
           if (rx_len > 0) {
             rx_buf[rx_len] = '\0';
+            // Trigger physical alarm if "ALARM_ON" is in the response body
             if (strstr((char*)rx_buf, "ALARM_ON")) {
               __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 500); 
             } else {
@@ -339,7 +341,7 @@ static void MX_DFSDM1_Init(void)
   hdfsdm1_filter0.Init.RegularParam.FastMode        = DISABLE;
   hdfsdm1_filter0.Init.RegularParam.DmaMode         = ENABLE;
   hdfsdm1_filter0.Init.FilterParam.SincOrder        = DFSDM_FILTER_SINC3_ORDER;
-  hdfsdm1_filter0.Init.FilterParam.Oversampling     = 160;
+  hdfsdm1_filter0.Init.FilterParam.Oversampling     = 128;
   hdfsdm1_filter0.Init.FilterParam.IntOversampling  = 1;
   if (HAL_DFSDM_FilterInit(&hdfsdm1_filter0) != HAL_OK) { while(1); }
 
