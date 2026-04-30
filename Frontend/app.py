@@ -27,26 +27,30 @@ def set_alarm():
 @app.route('/api/audio', methods=['GET', 'POST'])
 def audio_data():
     """Receive audio data from STM32 or serve latest reading to frontend"""
-    global latest_db_value
+    global latest_db_value, alarm_time
 
-    # STM32 is sending data
-    db_value = request.args.get('db', type=float)
-    if db_value is not None:
+    if request.method == 'POST':
+        json_data = request.get_json()
+        if not json_data or 'data' not in json_data:
+            return jsonify({"error": "Missing wakeup_time in request body"}), 400
+        
+        floats_1024 = json_data['data']
+
         with db_lock:
-            latest_db_value = db_value
-        # trigger the physical alarm
+            #Simple RMS-to-dB approximation for the UI
+            avg_mag = sum(floats_1024) / len(floats_1024)
+            latest_db_value = 20 * (avg_mag + 1) # Scaling for UI
+
+        # CHECK ALARM TRIGGER
         now = datetime.now().strftime("%H:%M")
         if alarm_time == now:
-            # This string triggers the strstr() check in your main.c
-            return "ALARM_ON", 200 
+            return "ALARM_ON", 200
             
         return "OK", 200
     
-    # Frontend is requesting data
+    # Frontend GET request
     with db_lock:
         return jsonify({"db": latest_db_value}), 200
-    
 
-
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+    if __name__ == "__main__":
+        app.run(host='0.0.0.0', port=5000)

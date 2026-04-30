@@ -126,7 +126,6 @@ static void Process_Audio_Data(uint32_t start_index, uint32_t length)
 
     // Connect and Send
     if (WIFI_GetHostAddress(TARGET_HOST, remote_ip, sizeof(remote_ip)) == WIFI_STATUS_OK) {
-      // Pass the resolved remote_ip instead of NULL
       if (WIFI_OpenClientConnection(WIFI_SOCKET, WIFI_TCP_PROTOCOL, "Flask", remote_ip, TARGET_PORT, 0) == WIFI_STATUS_OK) {
         
         // Send Header then Payload
