@@ -1,269 +1,265 @@
 <!DOCTYPE html>
-
 <html lang="en">
 
-
-
 <head>
-
 <title>Smart Alarm</title>
-
 <script src="https://cdn.tailwindcss.com"></script>
-
 </head>
-
-
 
 <body class="bg-slate-950 text-white h-screen flex flex-col items-center pt-20 selection:bg-blue-500">
 
-
+    <audio id="alarmAudio" loop>
+        <source src="/static/alarm.mp3" type="audio/mpeg">
+    </audio>
 
     <div class="relative group">
-
         <div class="absolute -inset-1 bg-gradient-to-r from-blue-600 to-cyan-500 rounded-2xl blur opacity-25 group-hover:opacity-50 transition duration-1000"></div>
-
         <div class="relative px-12 py-8 bg-slate-900 ring-1 ring-white/10 rounded-2xl leading-none flex flex-col items-center">
-
             <h1 id="clock" class="text-8xl font-mono font-bold tracking-tighter text-blue-400 drop-shadow-[0_0_15px_rgba(96,165,250,0.5)]">
-
                 00:00:00
-
             </h1>
-
             <span id="ampm" class="text-xl font-medium text-slate-500 mt-2 uppercase tracking-widest"></span>
-
         </div>
-
     </div>
 
-
-
     <button id="toggleBtn" onclick="toggleFormat()" class="mt-8 text-xs font-bold tracking-widest uppercase text-slate-400 hover:text-blue-400 transition-colors">
-
         SWITCH TO 12H FORMAT
-
     </button>
 
-
-
     <div class="mt-12 w-full max-w-md p-8 bg-slate-900/50 border border-white/5 rounded-3xl backdrop-blur-xl shadow-2xl">
-
         <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-widest mb-6">Set Alarm</h2>
-
         
-
         <div class="flex flex-col gap-4">
-
             <input type="time" id="alarmInput" 
-
                    class="bg-slate-800 border-none rounded-xl p-4 text-2xl font-mono text-blue-100 focus:ring-2 focus:ring-blue-500 outline-none transition-all [color-scheme:dark]">
-
             
-
             <button onclick="setAlarm()" 
-
                     class="w-full py-4 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold shadow-lg shadow-blue-900/20 active:scale-95 transition-all">
-
                 SET ALARM
-
             </button>
-
         </div>
-
         
-
         <p id="alarmStatus" class="mt-4 text-center text-sm text-slate-500 italic"></p>
 
-
-
         <div class="mt-8 border-t border-white/10 pt-6">
-
             <div class="flex justify-between items-center mb-3">
-
-                <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-widest">Ambient Noise</h3>
-
-                <span id="dbValue" class="text-xs font-mono text-blue-400">0 dB</span>
-
+                <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-widest">Average Magnitude</h3>
+                <span id="dbValue" class="text-xs font-mono text-blue-400">--</span>
             </div>
-
-
 
             <div class="relative w-full h-3 bg-slate-800 rounded-full overflow-hidden border border-white/5">
-
                 <div id="dbFill" class="h-full w-0 bg-gradient-to-r from-blue-600 to-cyan-400 transition-all duration-75 shadow-[0_0_10px_rgba(96,165,250,0.3)]"></div>
-
             </div>
 
-
-
             <button onclick="startMic()" id="micBtn" class="mt-4 w-full text-[10px] py-2 border border-slate-700 rounded-lg text-slate-500 hover:text-white hover:border-slate-500 transition-all uppercase tracking-[0.2em]">
-
-                Enable Microphone Sync
-
+                Enable Noise Display
             </button>
+        </div>
 
-        </div> 
-
+        <div id="alarmBanner" class="hidden mt-6 p-4 bg-blue-600/20 border border-blue-500/30 rounded-2xl text-center">
+            <p class="text-blue-300 font-bold tracking-widest uppercase text-2xl">⏰ WAKE UP!</p>
+            <p class="text-slate-400 text-sm mt-1">Time to rise and shine</p>
+            <button onclick="stopAlarm()" class="mt-3 px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-xs font-bold uppercase tracking-widest transition-all">
+                Dismiss
+            </button>
+        </div>
+                <!-- Calibration section -->
+        <div class="mt-8 border-t border-white/10 pt-6">
+            <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-4">Calibration</h3>
+            
+            <div class="flex flex-col gap-3">
+                <div class="flex items-center gap-3">
+                    <span class="text-xs text-slate-400 w-24 shrink-0">Min magnitude</span>
+                    <input type="number" id="silenceInput" placeholder="3000"
+                        class="flex-1 bg-slate-800 rounded-lg p-2 text-sm font-mono text-blue-100 outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="text-xs text-slate-400 w-24 shrink-0">Max magnitude</span>
+                    <input type="number" id="maxMagInput" placeholder="100000"
+                        class="flex-1 bg-slate-800 rounded-lg p-2 text-sm font-mono text-blue-100 outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div class="flex gap-2 mt-1">
+                    <button onclick="setCalibration()"
+                            class="flex-1 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-xs font-bold uppercase tracking-widest transition-all">
+                        Apply
+                    </button>
+                    <button onclick="resetCalibration()"
+                            class="flex-1 py-2 border border-slate-700 hover:border-slate-500 hover:text-white rounded-xl text-xs font-bold uppercase tracking-widest text-slate-400 transition-all">
+                        Reset
+                    </button>
+                </div>
+                <p id="calibrationStatus" class="text-center text-xs text-slate-500 italic"></p>
+            </div>
+        </div>
     </div> 
-
 </body>
 
-
-
 <script>
-
     let is24Hour = true;
-
     let alarmTime = null;
-
-
+    let alarmPlaying = false;
+    let displayEnabled = false;
 
     function toggleFormat() {
-
         is24Hour = !is24Hour;
-
-        document.getElementById('toggleText').textContent = is24Hour ? "Switch to 12H format" : "Switch to 24H format";
-
+        document.getElementById('toggleBtn').textContent = 
+            is24Hour ? 'Switch to 12H format' : 'Switch to 24H format';
     }
-
-
 
     function updateClock() {
-
         const now = new Date();
-
         let h = now.getHours();
-
         const m = String(now.getMinutes()).padStart(2, '0');
-
         const s = String(now.getSeconds()).padStart(2, '0');
-
         let ampm = '';
 
-
-
-        // Check for alarm trigger
-
-        const currentTimeString = String(h).padStart(2, '0') + ':' + m;
-
-        if (alarmTime === currentTimeString && s === "00") {
-
-            alert("WAKE UP!"); // Replace this with your triggerWakeup() function later
-
-        }
-
-
-
         if (!is24Hour) {
-
             ampm = h >= 12 ? 'PM' : 'AM';
-
-            h = h % 12 || 12; // Converts 0 to 12
-
+            h = h % 12 || 12;
         }
 
-
-
-        const hDisplay = String(h).padStart(2, '0');
-
-        document.getElementById('clock').textContent = `${hDisplay}:${m}:${s}`;
-
+        document.getElementById('clock').textContent = 
+            `${String(h).padStart(2, '0')}:${m}:${s}`;
         document.getElementById('ampm').textContent = ampm;
-
     }
-
-
 
     function setAlarm() {
-
         const val = document.getElementById('alarmInput').value;
-
         if (!val) return;
 
-        
-
         alarmTime = val;
+        document.getElementById('alarmStatus').textContent = `Alarm set for ${val}`;
 
-        document.getElementById('alarmStatus').textContent = `Alarm confirmed for ${val}`;
-
-        
-
-        // This sends it to your Flask backend
+        /* unlock audio on this user gesture */
+        const audio = document.getElementById('alarmAudio');
+        audio.volume = 0;
+        audio.play().then(() => {
+            audio.pause();
+            audio.currentTime = 0;
+            audio.volume = 1;
+        }).catch(() => {});
 
         fetch('/api/alarm/set', {
-
             method: 'POST',
-
             headers: { 'Content-Type': 'application/json' },
-
             body: JSON.stringify({ wakeup_time: val })
-
         });
-
     }
 
-
-
-    // Run clock every second
-
-    setInterval(updateClock, 1000);
-
-    updateClock(); // Run immediately so it doesn't show 00:00:00 on load
-
-
-    // Poll for audio data from STM32
-    let micInterval = null;
-    let micEnabled = false;
-    
-    function startMic() {
-        micEnabled = !micEnabled;
-        const btn = document.getElementById('micBtn');
-        
-        if (micEnabled) {
-            btn.textContent = 'Disable Microphone Sync';
-            btn.classList.add('bg-blue-600', 'border-blue-500', 'text-white');
-            btn.classList.remove('border-slate-700', 'text-slate-500');
-            
-            // Start polling for audio data
-            micInterval = setInterval(fetchAudioData, 200);
-        } else {
-            btn.textContent = 'Enable Microphone Sync';
-            btn.classList.remove('bg-blue-600', 'border-blue-500', 'text-white');
-            btn.classList.add('border-slate-700', 'text-slate-500');
-            
-            // Reset display
-            document.getElementById('dbValue').textContent = '0 dB';
-            document.getElementById('dbFill').style.width = '0%';
-            
-            btn.textContent = 'Enable Microphone Sync';
-            clearInterval(micInterval); // This is the crucial missing piece
-            micInterval = null;
+    function triggerAlarm(volumePercent) {
+        const audio = document.getElementById('alarmAudio');
+        audio.volume = Math.min(1.0, Math.max(0.1, volumePercent / 100));
+        if (!alarmPlaying) {
+            audio.play().catch(err => console.error('Audio play failed:', err));
+            alarmPlaying = true;
+            document.getElementById('alarmBanner').classList.remove('hidden');
         }
     }
-    
+
+    function stopAlarm() {
+        const audio = document.getElementById('alarmAudio');
+        audio.pause();
+        audio.currentTime = 0;
+        alarmPlaying = false;
+        document.getElementById('alarmBanner').classList.add('hidden');
+
+        /* unset alarm so it doesn't retrigger */
+        alarmTime = null;
+        document.getElementById('alarmStatus').textContent = 'Alarm dismissed';
+
+        /* tell Flask to clear alarm time too */
+        fetch('/api/alarm/set', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ wakeup_time: null })
+        });
+    }
+
+    function startMic() {
+        displayEnabled = !displayEnabled;
+        const btn = document.getElementById('micBtn');
+
+        if (displayEnabled) {
+            btn.textContent = 'Disable Noise Display';
+            btn.classList.add('bg-blue-600', 'border-blue-500', 'text-white');
+            btn.classList.remove('border-slate-700', 'text-slate-500');
+        } else {
+            btn.textContent = 'Enable Noise Display';
+            btn.classList.remove('bg-blue-600', 'border-blue-500', 'text-white');
+            btn.classList.add('border-slate-700', 'text-slate-500');
+            document.getElementById('dbValue').textContent = '--';
+            document.getElementById('dbFill').style.width = '0%';
+        }
+    }
+
     function fetchAudioData() {
-        if (!micEnabled) return;
-        
         fetch('/api/audio')
             .then(response => response.json())
             .then(data => {
-                const db = data.db || 0;
-                
-                // Update the dB display
-                document.getElementById('dbValue').textContent = db.toFixed(1) + ' dB';
-                
-                // Map dB to percentage (30-120 dB range -> 0-100%)
-                const minDb = 30;
-                const maxDb = 120;
-                const percentage = Math.min(100, Math.max(0, ((db - minDb) / (maxDb - minDb)) * 100));
-                
-                document.getElementById('dbFill').style.width = percentage + '%';
+                /* always check alarm regardless of display */
+                if (data.alarm) {
+                    triggerAlarm(data.db || 0);
+                } else if (alarmPlaying) {
+                    stopAlarm();
+                }
+
+                /* only update display if enabled */
+                if (displayEnabled) {
+                    const mag = data.mag || 0;
+                    document.getElementById('dbValue').textContent = Math.round(mag);
+                    /* bar still uses db % for visual width */
+                    const db = data.db || 0;
+                    document.getElementById('dbFill').style.width = db + '%';
+                }
             })
             .catch(err => console.error('Error fetching audio data:', err));
     }
 
+    const DEFAULT_SILENCE = 3000;
+    const DEFAULT_MAX_MAG = 100000;
+
+    function setCalibration() {
+        const silence = parseFloat(document.getElementById('silenceInput').value);
+        const maxMag  = parseFloat(document.getElementById('maxMagInput').value);
+
+        if (isNaN(silence) || isNaN(maxMag)) {
+            document.getElementById('calibrationStatus').textContent = 'Please enter valid numbers.';
+            return;
+        }
+
+        fetch('/api/calibrate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ silence_mag: silence, max_mag: maxMag })
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('calibrationStatus').textContent = 
+                `Set: silence=${silence}, max=${maxMag}`;
+        })
+        .catch(err => console.error('Calibration error:', err));
+    }
+
+    function resetCalibration() {
+        document.getElementById('silenceInput').value = '';
+        document.getElementById('maxMagInput').value = '';
+
+        fetch('/api/calibrate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ silence_mag: DEFAULT_SILENCE, max_mag: DEFAULT_MAX_MAG })
+        })
+        .then(response => response.json())
+        .then(() => {
+            document.getElementById('calibrationStatus').textContent = 
+                `Reset to defaults: silence=${DEFAULT_SILENCE}, max=${DEFAULT_MAX_MAG}`;
+        })
+        .catch(err => console.error('Reset error:', err));
+    }
+
+    setInterval(updateClock, 1000);
+    setInterval(fetchAudioData, 200);  /* always polling */
+    updateClock();
 </script>
-
-
 
 </html>
