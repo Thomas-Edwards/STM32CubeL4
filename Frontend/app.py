@@ -1,56 +1,75 @@
 from datetime import datetime
-
+import struct
 from flask import Flask, render_template, request, jsonify
 import threading
 
-
 app = Flask(__name__)
 
-# Global variable to store the latest dB reading
 latest_db_value = 0
+latest_mag_value = 0
 db_lock = threading.Lock()
+alarm_time = None
 
+SILENCE_MAG = 3000.0
+MAX_MAG     = 100000.0
+SMOOTHING   = 0.1
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/api/alarm/set', methods=['POST']) 
+@app.route('/api/alarm/set', methods=['POST'])
 def set_alarm():
     global alarm_time
-    data = request.json  # This gets the { wakeup_time: val } from your JS
+    data = request.json
     alarm_time = data.get('wakeup_time')
     print(f"Alarm set for: {alarm_time}")
     return jsonify({"message": "Alarm received"}), 200
 
-
 @app.route('/api/audio', methods=['GET', 'POST'])
 def audio_data():
-    """Receive audio data from STM32 or serve latest reading to frontend"""
-    global latest_db_value, alarm_time
+    global latest_db_value, alarm_time, latest_mag_value
 
     if request.method == 'POST':
-        json_data = request.get_json()
-        if not json_data or 'data' not in json_data:
-            return jsonify({"error": "Missing wakeup_time in request body"}), 400
-        
-        floats_1024 = json_data['data']
+        raw = request.data
+        if not raw:
+            return jsonify({"error": "No data received"}), 400
+
+        num_floats = len(raw) // 4
+        floats = struct.unpack(f'{num_floats}f', raw[:num_floats*4])
 
         with db_lock:
-            #Simple RMS-to-dB approximation for the UI
-            avg_mag = sum(floats_1024) / len(floats_1024)
-            latest_db_value = 20 * (avg_mag + 1) # Scaling for UI
+            avg_mag = sum(floats) / len(floats)
+            latest_mag_value = avg_mag  # store raw magnitude
+            normalized = (avg_mag - SILENCE_MAG) / (MAX_MAG - SILENCE_MAG)
+            instant = max(0.0, min(100.0, normalized * 100.0))
+            latest_db_value = (SMOOTHING * instant) + ((1 - SMOOTHING) * latest_db_value)
+            print(f"avg_mag: {avg_mag:.0f}  ->  {latest_db_value:.1f}%")
 
-        # CHECK ALARM TRIGGER
         now = datetime.now().strftime("%H:%M")
-        if alarm_time == now:
+        if alarm_time is not None and alarm_time == now:
             return "ALARM_ON", 200
-            
-        return "OK", 200
-    
-    # Frontend GET request
-    with db_lock:
-        return jsonify({"db": latest_db_value}), 200
 
-    if __name__ == "__main__":
-        app.run(host='0.0.0.0', port=5000)
+        return "OK", 200
+
+    with db_lock:
+        now = datetime.now().strftime("%H:%M")
+        alarm_active = alarm_time is not None and alarm_time == now
+        return jsonify({
+            "db": latest_db_value,
+            "mag": latest_mag_value,
+            "alarm": alarm_active
+        }), 200
+
+
+@app.route('/api/calibrate', methods=['POST'])
+def calibrate():
+    global SILENCE_MAG, MAX_MAG
+    data = request.json
+    SILENCE_MAG = float(data.get('silence_mag', 3000.0))
+    MAX_MAG     = float(data.get('max_mag', 100000.0))
+    print(f"Calibration updated: SILENCE_MAG={SILENCE_MAG}, MAX_MAG={MAX_MAG}")
+    return jsonify({"silence_mag": SILENCE_MAG, "max_mag": MAX_MAG}), 200
+
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', port=5000)
