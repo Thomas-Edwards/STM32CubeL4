@@ -1,44 +1,46 @@
-import pandas as pd
-from tqdm import tqdm
-import os
 import numpy as np
-from scipy.io import wavfile
 from python_speech_features import mfcc
 from keras.models import load_model
-from sklearn.metrics import accuracy_score
-import pickle
+import numpy as np
+from python_speech_features import mfcc
 
-def build_prediction(file):
+def build_prediction(buffer, config, model, rate=16000):
+
     preds = []
-    
-    rate, wav = wavfile.read(file)
-    
-    for i in range(0, wav.shape[0]-config.step, config.step):
-        sample = wav[i:i+config.step]
+
+    # convert raw bytes to numpy int16
+    wav = np.frombuffer(buffer, dtype=np.int16)
+
+    # convert to float
+    wav = wav.astype(np.float32)
+
+    # normalize audio amplitude
+    wav = wav / 32768.0
+
+    for i in range(0, wav.shape[0] - config.step, config.step):
+
+        sample = wav[i:i + config.step]
+
+        # skip silent chunks
+        if np.abs(sample).mean() < 0.01:
+            continue
+
         x = mfcc(sample, rate, numcep=config.nfeat,
-                    nfilt=config.nfilt, nfft=config.nfft)
-        
+                 nfilt=config.nfilt, nfft=config.nfft)
+
+        # feature normalization
         x = (x - np.mean(x)) / np.std(x)
 
+        # CNN input shape
         x = x.reshape(1, x.shape[0], x.shape[1], 1)
-        pred = model.predict(x)[0][0]   # sigmoid output
+        pred = model.predict(x, verbose=0)[0][0]
+
         preds.append(pred)
 
-    # average over all windows
+    # handle empty predictions
+    if len(preds) == 0:
+        return 0
+
     final_pred = np.mean(preds)
 
     return int(final_pred > 0.5)
-
-
-
-df = pd.read_csv('Model_Training_Data.csv')
-classes = list(np.unique(df.label))
-fn2class = dict(zip(df.index, df.label))
-p_path = os.path.join('Pickle', 'alarm.p')
-
-with open(p_path, 'rb') as handle:
-    config = pickle.load(handle)
-
-model = load_model(config.model_path)
-
-y_pred = build_prediction('filename.wav')
