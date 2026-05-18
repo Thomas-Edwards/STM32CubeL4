@@ -11,7 +11,7 @@ def convert_folder(bin_dir, out_dir, label):
         with open(path, 'rb') as handle:
             raw = handle.read()
         samples = np.frombuffer(raw, dtype=np.int32)
-        wav = (samples / 65536).astype(np.int16)
+        wav = samples.astype(np.int16)
         wav_name = f.replace('.bin', '.wav')
         out_path = os.path.join(out_dir, wav_name)
         wavfile.write(out_path, 16000, wav)
