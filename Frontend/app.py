@@ -1,6 +1,6 @@
 from datetime import datetime
 import struct
-from flask import Flask, config, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify
 import threading
 import os
 import pickle

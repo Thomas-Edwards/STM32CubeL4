@@ -1,15 +1,13 @@
 import numpy as np
 from python_speech_features import mfcc
 from keras.models import load_model
-import numpy as np
 from python_speech_features import mfcc
 
 def build_prediction(buffer, config, model, rate=16000):
-
     preds = []
 
-    # convert raw bytes to numpy int16
-    wav = np.frombuffer(buffer, dtype=np.int16)
+    # convert raw bytes to numpy int32
+    wav = np.frombuffer(buffer, dtype=np.int32)
 
     # convert to float
     wav = wav.astype(np.float32)

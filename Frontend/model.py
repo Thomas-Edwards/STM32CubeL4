@@ -1,17 +1,17 @@
 import pandas as pd
 from tqdm import tqdm
 import os
+import librosa
 import numpy as np
 from scipy.io import wavfile
-import librosa
-from python_speech_features import mfcc, logfbank
-from keras.utils import to_categorical
+from python_speech_features import mfcc
 from keras.models import Sequential
 from keras.layers import Conv2D, MaxPool2D, Flatten, Dropout, Dense, Input
+from keras.callbacks import EarlyStopping
 from sklearn.utils.class_weight import compute_class_weight
 import pickle
 from keras.callbacks import ModelCheckpoint
-from STM32CubeL4.Frontend.cfg import Config
+from cfg import Config
 
 def check_data():
     if os.path.isfile(config.p_path):
@@ -21,35 +21,77 @@ def check_data():
     else:
         return None
 
+# def build_rand_feat():
+#     tmp = check_data()
+#     if tmp:
+#         return tmp.data[0], tmp.data[1]
+#     X = []
+#     y = []
+#     _min, _max = float('inf'), -float('inf')
+#     for _ in tqdm(range(n_samples)):
+#         rand_class = np.random.choice(class_dist.index, p=prob_dist)
+#         file = np.random.choice(df[df.label==rand_class].index)
+#         rate, wav = wavfile.read('Dataset/Original/'+file)
+#         label = df.at[file, 'label']
+#         rand_index = np.random.randint(0, wav.shape[0]-config.step)
+#         sample = wav[rand_index:rand_index+config.step]
+#         X_sample = mfcc(sample, rate,
+#                         numcep=config.nfeat, nfilt=config.nfilt,
+#                         nfft=config.nfft).T
+#         X_sample = (X_sample - np.mean(X_sample)) / np.std(X_sample)
+#         _min = min(np.amin(X_sample), _min)
+#         _max = max(np.amax(X_sample), _max)
+#         X.append(X_sample)
+#         y.append(classes.index(label))
+
+#     config.min = _min
+#     config.max = _max
+
+#     X, y = np.array(X), np.array(y)
+
+#     X = X.reshape(X.shape[0], X.shape[1], X.shape[2], 1)
+    
+#     y = np.array(y)
+#     config.data = (X, y)
+
+#     with open(config.p_path, 'wb') as handle:
+#         pickle.dump(config, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+#     return X, y
+
 def build_rand_feat():
     tmp = check_data()
     if tmp:
         return tmp.data[0], tmp.data[1]
     X = []
     y = []
-    _min, _max = float('inf'), -float('inf')
+
     for _ in tqdm(range(n_samples)):
         rand_class = np.random.choice(class_dist.index, p=prob_dist)
         file = np.random.choice(df[df.label==rand_class].index)
         rate, wav = wavfile.read('Dataset/Original/'+file)
         label = df.at[file, 'label']
-        rand_index = np.random.randint(0, wav.shape[0]-config.step)
-        sample = wav[rand_index:rand_index+config.step]
-        X_sample = mfcc(sample, rate,
-                        numcep=config.nfeat, nfilt=config.nfilt,
-                        nfft=config.nfft).T
+        sample = wav[:config.rate]
+
+        # Pad if shorter than 1 second
+        if len(sample) < config.rate:
+            sample = np.pad(sample, (0, config.rate - len(sample)))
+
+        X_sample = librosa.feature.melspectrogram(
+            y=sample.astype(float), sr=rate, n_mels=128
+        )
+        X_sample = librosa.power_to_db(X_sample, ref=np.max)
+
         X_sample = (X_sample - np.mean(X_sample)) / np.std(X_sample)
-        _min = min(np.amin(X_sample), _min)
-        _max = max(np.amax(X_sample), _max)
+
         X.append(X_sample)
         y.append(classes.index(label))
 
     X, y = np.array(X), np.array(y)
-
     X = X.reshape(X.shape[0], X.shape[1], X.shape[2], 1)
-    
-    y = np.array(y)
+
     config.data = (X, y)
+    config.input_shape = X.shape[1:]
 
     with open(config.p_path, 'wb') as handle:
         pickle.dump(config, handle, protocol=pickle.HIGHEST_PROTOCOL)
@@ -110,9 +152,15 @@ checkpoint = ModelCheckpoint(config.model_path,
                              monitor='val_acc', verbose=1, mode='max',
                              save_best_only=True, save_weights_only=False)
 
-model.fit(X, y, epochs=50, batch_size=32, shuffle=True,
-          class_weight=class_weight, validation_split=0.1,
-          callbacks=[checkpoint])
+print(config.model_path)
+
+early_stop = EarlyStopping(
+    monitor='val_loss',
+    patience=7,
+    restore_best_weights=True
+)
+
+model.fit(X, y, epochs=10, batch_size=32, shuffle=True,
+          validation_split=0.2, callbacks=[checkpoint, early_stop])
 
 model.save(config.model_path)
-
