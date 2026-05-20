@@ -13,24 +13,25 @@
 #include "arm_const_structs.h"
 
 /* Network config ------------------------------------------------------------*/
-#define SSID               "Thomas Edwards"
-#define PASSWORD           "magicword"
+
+#define SSID               "Chris"
+#define PASSWORD           "poobutt123"
+#define TARGET_HOST        "172.20.10.8"
 
 #define WIFI_SOCKET        0
 #define WIFI_READ_TIMEOUT  20000
 #define WIFI_WRITE_TIMEOUT 10000
 
-#define TARGET_HOST        "172.20.10.7"
 #define TARGET_PORT        5000
-
 #define TARGET_IP_0        172
 #define TARGET_IP_1        20
 #define TARGET_IP_2        10
-#define TARGET_IP_3        7
+#define TARGET_IP_3        8
 
 /* Audio/FFT config ----------------------------------------------------------*/
 #define BUFFER_SIZE        2048
 #define LED_MAX_DUTY       999
+#define CLASSIFY_BUFFER_SIZE 16000
 
 /* Private variables ---------------------------------------------------------*/
 extern UART_HandleTypeDef hDiscoUart;
@@ -47,9 +48,11 @@ TIM_HandleTypeDef htim2;
 volatile uint8_t  data_ready_flag = 0;
 __attribute__((aligned(4))) volatile int32_t  ringbuffer[BUFFER_SIZE];
 __attribute__((aligned(4))) float32_t         fft_input[BUFFER_SIZE/2];
-__attribute__((aligned(4))) float32_t         fft_output[BUFFER_SIZE];
-__attribute__((aligned(4))) float32_t         to_send[BUFFER_SIZE/2];
+//__attribute__((aligned(4))) float32_t         fft_output[BUFFER_SIZE];
+//__attribute__((aligned(4))) float32_t         to_send[BUFFER_SIZE/2];
 arm_rfft_fast_instance_f32  fft_handler;
+static int32_t  classify_acc[CLASSIFY_BUFFER_SIZE];
+static uint32_t classify_count = 0;
 
 /* Printf retarget -----------------------------------------------------------*/
 #ifdef __GNUC__
@@ -85,7 +88,9 @@ void HAL_DFSDM_FilterRegConvCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filt
 
 static void Process_Audio_Data(uint32_t start_index, uint32_t length)
 {
-  static uint32_t last_send_tick = 0;
+	static float32_t fft_output[BUFFER_SIZE];
+	static float32_t to_send[BUFFER_SIZE/2];
+	static uint32_t last_send_tick = 0;
 
   /* DC Offset Removal */
   int64_t dc_sum = 0;
@@ -103,50 +108,50 @@ static void Process_Audio_Data(uint32_t start_index, uint32_t length)
   arm_cmplx_mag_f32(fft_output, to_send, BUFFER_SIZE/2);
   to_send[0] = 0;
 
-  /* Send every 200ms */
+  /* Accumulate raw samples for classifier */
+  uint32_t to_copy = length;
+  if (classify_count + to_copy > CLASSIFY_BUFFER_SIZE)
+    to_copy = CLASSIFY_BUFFER_SIZE - classify_count;
+  memcpy(&classify_acc[classify_count],
+         (int32_t *)&ringbuffer[start_index],
+         to_copy * sizeof(int32_t));
+  classify_count += to_copy;
+
+  /* Every 200ms: send FFT magnitude data for dB display */
   if (HAL_GetTick() - last_send_tick > 200)
   {
     uint8_t  remote_ip[4];
     uint16_t sent_len;
 
-    if (WIFI_GetHostAddress(TARGET_HOST, remote_ip, sizeof(remote_ip)) != WIFI_STATUS_OK)
-    {
-      remote_ip[0] = TARGET_IP_0;
-      remote_ip[1] = TARGET_IP_1;
-      remote_ip[2] = TARGET_IP_2;
-      remote_ip[3] = TARGET_IP_3;
-    }
+    remote_ip[0] = TARGET_IP_0;
+    remote_ip[1] = TARGET_IP_1;
+    remote_ip[2] = TARGET_IP_2;
+    remote_ip[3] = TARGET_IP_3;
 
     if (WIFI_OpenClientConnection(WIFI_SOCKET, WIFI_TCP_PROTOCOL,
-                                  TARGET_HOST, remote_ip,
-                                  TARGET_PORT, 0) == WIFI_STATUS_OK)
+                                  "Flask", remote_ip, TARGET_PORT, 0) == WIFI_STATUS_OK)
     {
-      /* Build HTTP POST header */
-      static char http_header[128];
+      static char http_header[256];
       uint16_t data_len = (BUFFER_SIZE/2) * sizeof(float32_t);
       int header_len = snprintf(http_header, sizeof(http_header),
           "POST /api/audio HTTP/1.0\r\n"
           "Host: %s\r\n"
           "Content-Type: application/octet-stream\r\n"
           "Content-Length: %d\r\n"
-          "\r\n", TARGET_HOST, data_len);
+          "Connection: close\r\n\r\n",
+          TARGET_HOST, data_len);
 
-      /* Send header first */
-      WIFI_SendData(WIFI_SOCKET, (uint8_t*)http_header,
-                    (uint16_t)header_len, &sent_len, 5000);
+      WIFI_SendData(WIFI_SOCKET, (uint8_t*)http_header, header_len, &sent_len, 5000);
 
-      /* Send binary data in 1200 byte chunks */
       uint8_t  *ptr      = (uint8_t *)to_send;
       uint16_t remaining = data_len;
-      while (remaining > 0)
-      {
+      while (remaining > 0) {
         uint16_t chunk = (remaining > 1200) ? 1200 : remaining;
         WIFI_SendData(WIFI_SOCKET, ptr, chunk, &sent_len, 5000);
         ptr       += sent_len;
         remaining -= sent_len;
       }
 
-      /* Read response — check for ALARM_ON */
       uint8_t  rx_buf[128];
       uint16_t rx_len = 0;
       if (WIFI_ReceiveData(WIFI_SOCKET, rx_buf, sizeof(rx_buf)-1,
@@ -163,6 +168,60 @@ static void Process_Audio_Data(uint32_t start_index, uint32_t length)
     }
 
     last_send_tick = HAL_GetTick();
+  }
+
+  /* Every 1 second: send raw audio for classifier */
+  if (classify_count >= CLASSIFY_BUFFER_SIZE) {
+    HAL_Delay(100);
+    WIFI_CloseClientConnection(WIFI_SOCKET);
+    HAL_Delay(100);
+
+    uint8_t remote_ip[4];
+    remote_ip[0] = TARGET_IP_0;
+    remote_ip[1] = TARGET_IP_1;
+    remote_ip[2] = TARGET_IP_2;
+    remote_ip[3] = TARGET_IP_3;
+
+    if (WIFI_OpenClientConnection(WIFI_SOCKET, WIFI_TCP_PROTOCOL,
+                                  "Flask", remote_ip, TARGET_PORT, 0) == WIFI_STATUS_OK)
+    {
+      char header[256];
+      int header_len = snprintf(header, sizeof(header),
+          "POST /api/classify HTTP/1.0\r\n"
+          "Host: %s\r\n"
+          "Content-Type: application/octet-stream\r\n"
+          "Content-Length: %lu\r\n"
+          "Connection: close\r\n\r\n",
+          TARGET_HOST, (unsigned long)(CLASSIFY_BUFFER_SIZE * 4));
+
+      uint16_t sent_len;
+      WIFI_SendData(WIFI_SOCKET, (uint8_t*)header, header_len, &sent_len, 5000);
+
+      uint8_t  *ptr      = (uint8_t *)classify_acc;
+      uint32_t remaining = CLASSIFY_BUFFER_SIZE * 4;
+      while (remaining > 0) {
+        uint16_t chunk = (remaining > 1200) ? 1200 : (uint16_t)remaining;
+        WIFI_SendData(WIFI_SOCKET, ptr, chunk, &sent_len, 5000);
+        ptr       += sent_len;
+        remaining -= sent_len;
+      }
+
+      uint8_t  rx_buf[128];
+      uint16_t rx_len = 0;
+      if (WIFI_ReceiveData(WIFI_SOCKET, rx_buf, sizeof(rx_buf)-1,
+                           &rx_len, 5000) == WIFI_STATUS_OK && rx_len > 0)
+      {
+        rx_buf[rx_len] = '\0';
+        if (strstr((char*)rx_buf, "ALARM_ON"))
+          __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 500);
+        else
+          __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0);
+      }
+
+      WIFI_CloseClientConnection(WIFI_SOCKET);
+    }
+
+    classify_count = 0;
   }
 }
 
@@ -212,11 +271,11 @@ int main(void)
   }
 
   /* Test GET request */
-  if (send_http_get() != 0)
-  {
-    printf("HTTP GET failed.\r\n");
-    while (1) { BSP_LED_Toggle(LED2); HAL_Delay(500); }
-  }
+//  if (send_http_get() != 0)
+//  {
+//    printf("HTTP GET failed.\r\n");
+//    while (1) { BSP_LED_Toggle(LED2); HAL_Delay(500); }
+//  }
 
   BSP_LED_On(LED2);
   printf("Done! Running audio loop.\r\n");
